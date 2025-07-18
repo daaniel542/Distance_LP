@@ -77,7 +77,7 @@ if st.button("🚀 Calculate Distances"):
     progress = st.progress(0)
 
     rows = []
-    has_dist = "Distance_mi" in df.columns  # existing column from old runs
+    has_dist = "Distance_mi" in df.columns  # legacy check
 
     for i, row in df.iterrows():
         elapsed = time.time() - start_time
@@ -118,6 +118,7 @@ if st.button("🚀 Calculate Distances"):
             "distance_miles": dist
         })
 
+    # Clear placeholders
     progress.empty()
     status.empty()
 
@@ -133,7 +134,7 @@ if st.button("🚀 Calculate Distances"):
         st.subheader("✅ Non-Ambiguous Entries")
         st.dataframe(nonambig_df)
 
-        # Download links
+        # Download Non-Ambiguous Results (CSV)
         csv_bytes = nonambig_df.to_csv(index=False).encode("utf-8")
         b64_csv = base64.b64encode(csv_bytes).decode()
         st.markdown(
@@ -142,6 +143,7 @@ if st.button("🚀 Calculate Distances"):
             unsafe_allow_html=True
         )
 
+        # Download Non-Ambiguous Results (Excel)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
             nonambig_df.to_excel(writer, index=False)
@@ -153,34 +155,41 @@ if st.button("🚀 Calculate Distances"):
             unsafe_allow_html=True
         )
 
-    # --- Ambiguous Results Preview ---
-    st.subheader("🔍 Ambiguous Results Preview")
-    ambig_preview = result.head(5)
-    st.dataframe(ambig_preview)
+    # --- Ambiguous Entries (modeled like Non-Ambiguous) ---
+    ambig_df = result[
+        (result["is_origin_ambiguous"]) |
+        (result["is_destination_ambiguous"])
+    ]
+    if not ambig_df.empty:
+        st.subheader("🔍 Ambiguous Entries")
+        st.dataframe(ambig_df)
 
-    csv_bytes = ambig_preview.to_csv(index=False).encode("utf-8")
-    b64_csv = base64.b64encode(csv_bytes).decode()
-    st.markdown(
-        f'<a href="data:file/csv;base64,{b64_csv}" download="ambiguous_preview.csv">'
-        "📥 Download Preview (CSV)</a>",
-        unsafe_allow_html=True
-    )
+        # Download Ambiguous Results (CSV)
+        csv_bytes = ambig_df.to_csv(index=False).encode("utf-8")
+        b64_csv = base64.b64encode(csv_bytes).decode()
+        st.markdown(
+            f'<a href="data:file/csv;base64,{b64_csv}" download="ambiguous_results.csv">'
+            "📥 Download Ambiguous Results (CSV)</a>",
+            unsafe_allow_html=True
+        )
 
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        ambig_preview.to_excel(writer, index=False)
-    excel_bytes = output.getvalue()
-    b64_xl = base64.b64encode(excel_bytes).decode()
-    st.markdown(
-        f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_xl}" '
-        'download="ambiguous_preview.xlsx">📥 Download Preview (Excel)</a>',
-        unsafe_allow_html=True
-    )
+        # Download Ambiguous Results (Excel)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            ambig_df.to_excel(writer, index=False)
+        excel_bytes = output.getvalue()
+        b64_xl = base64.b64encode(excel_bytes).decode()
+        st.markdown(
+            f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_xl}" '
+            'download="ambiguous_results.xlsx">📥 Download Ambiguous Results (Excel)</a>',
+            unsafe_allow_html=True
+        )
 
-    # --- All Results ---
+    # --- All Results (optional) ---
     with st.expander("📂 All Results"):
         st.dataframe(result)
 
+        # Download All Results (CSV)
         csv_bytes = result.to_csv(index=False).encode("utf-8")
         b64_csv = base64.b64encode(csv_bytes).decode()
         st.markdown(
@@ -189,6 +198,7 @@ if st.button("🚀 Calculate Distances"):
             unsafe_allow_html=True
         )
 
+        # Download All Results (Excel)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
             result.to_excel(writer, index=False)
