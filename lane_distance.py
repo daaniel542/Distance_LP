@@ -1,14 +1,17 @@
+# lane_distance.py
 #!/usr/bin/env python3
 """
-Lane Distance Calculator (Mapbox Edition)
------------------------------------------
+Lane Distance Calculator (Mapbox + Coordinates Edition)
+-------------------------------------------------------
 Reads a CSV/XLSX with columns 'Origin' and 'Destination',
-geocodes each via Mapbox, computes straight-line (great-circle)
-distances in miles, and writes out a new file with a 'Distance_mi' column.
+geocodes each via Mapbox to get latitude & longitude,
+computes straight-line distances in miles,
+and outputs a file with Origin, Destination,
+origin_lat, origin_lon, destination_lat, destination_lon, and Distance_mi.
 """
 
 import os
-from dotenv import load_dotenv      # ← load .env at import time
+from dotenv import load_dotenv
 load_dotenv()
 
 import sys
@@ -21,20 +24,33 @@ from mapbox import Geocoder
 from geopy.distance import geodesic
 from geopy.extra.rate_limiter import RateLimiter
 
+
 def make_mapbox_geocoder():
-    """Return a rate-limited Mapbox forward geocoder."""
     token = os.getenv("MAPBOX_TOKEN")
     if not token:
-        sys.exit("❌ MAPBOX_TOKEN not set. Put it in a .env file or env vars.")
+        sys.exit("❌ MAPBOX_TOKEN not set. Put it in a .env file or environment.")
     mb = Geocoder(access_token=token)
-    return RateLimiter(mb.forward, min_delay_seconds=1, max_retries=2, error_wait_seconds=5)
+    forward = RateLimiter(mb.forward, min_delay_seconds=1, max_retries=2, error_wait_seconds=5)
+
+    def _forward(place: str):
+        try:
+            resp = forward(place, limit=1)
+            data = resp.geojson()
+            feats = data.get("features") or []
+            if not feats:
+                return None, None
+            lon, lat = feats[0]["geometry"]["coordinates"]
+            return lat, lon
+        except Exception as e:
+            logging.warning(f"[geocode] error for '{place}': {e}")
+            return None, None
+
+    return _forward
+
 
 def process_file(infile: pathlib.Path, outfile: pathlib.Path = None) -> pathlib.Path:
-    """
-    Read infile (CSV or Excel), compute distances, write to outfile,
-    and return outfile path.
-    """
     suffix = infile.suffix.lower()
+    # read input
     if suffix in (".xls", ".xlsx"):
         df = pd.read_excel(infile)
     else:
@@ -42,50 +58,56 @@ def process_file(infile: pathlib.Path, outfile: pathlib.Path = None) -> pathlib.
 
     geocode = make_mapbox_geocoder()
 
-    # helper to get (lat,lon) or (None, None)
-    def coords(place: str):
-        try:
-            resp = geocode(place, limit=1)
-            data = resp.geojson()
-            feats = data.get("features") or []
-            if not feats:
-                return None, None
-            lng, lat = feats[0]["geometry"]["coordinates"]
-            return lat, lng
-        except Exception as e:
-            logging.warning(f"Geocode error for '{place}': {e}")
-            return None, None
+    # apply geocoding: latitude & longitude
+    orig_coords = df["Origin"].apply(
+        lambda p: pd.Series(geocode(p), index=["origin_lat", "origin_lon"])
+    )
+    dest_coords = df["Destination"].apply(
+        lambda p: pd.Series(geocode(p), index=["destination_lat", "destination_lon"])
+    )
+    df = pd.concat([df, orig_coords, dest_coords], axis=1)
 
-    # apply geocoding
-    df[["orig_lat", "orig_lon"]] = df["Origin"].apply(lambda s: pd.Series(coords(s)))
-    df[["dest_lat", "dest_lon"]] = df["Destination"].apply(lambda s: pd.Series(coords(s)))
-
-    # compute distance
-    def compute(row):
-        if None in (row.orig_lat, row.orig_lon, row.dest_lat, row.dest_lon):
+    # compute distances
+    def compute_distance(row):
+        if None in (
+            row.origin_lat, row.origin_lon,
+            row.destination_lat, row.destination_lon
+        ):
             return None
-        return geodesic((row.orig_lat, row.orig_lon), (row.dest_lat, row.dest_lon)).miles
+        return geodesic(
+            (row.origin_lat, row.origin_lon),
+            (row.destination_lat, row.destination_lon)
+        ).miles
 
-    df["Distance_mi"] = df.apply(compute, axis=1)
+    df["Distance_mi"] = df.apply(compute_distance, axis=1)
+
+    # select required columns
+    out_df = df[[
+        "Origin", "Destination",
+        "origin_lat", "origin_lon",
+        "destination_lat", "destination_lon",
+        "Distance_mi"
+    ]]
 
     # determine output path
     if outfile is None:
         outfile = infile.with_name(f"{infile.stem}_processed{infile.suffix}")
 
-    # write
+    # write output
     if outfile.suffix.lower() in (".xls", ".xlsx"):
-        df.to_excel(outfile, index=False)
+        out_df.to_excel(outfile, index=False)
     else:
-        df.to_csv(outfile, index=False)
+        out_df.to_csv(outfile, index=False)
 
     return outfile
 
+
 def main():
-    p = argparse.ArgumentParser(description="Compute lane distances.")
-    p.add_argument("infile", type=pathlib.Path, help="CSV or XLSX input")
-    p.add_argument("-o", "--out", type=pathlib.Path, help="Output file path")
-    p.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
-    args = p.parse_args()
+    parser = argparse.ArgumentParser(description="Compute lane distances with coords.")
+    parser.add_argument("infile", type=pathlib.Path, help="CSV or XLSX input file")
+    parser.add_argument("-o", "--out", type=pathlib.Path, help="Output file path")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
+    args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -96,7 +118,8 @@ def main():
         sys.exit(f"❌ Input not found: {args.infile}")
 
     out = process_file(args.infile, args.out)
-    logging.info(f"✅ Written results to {out}")
+    logging.info(f"✅ Written to {out}")
+
 
 if __name__ == "__main__":
     main()
