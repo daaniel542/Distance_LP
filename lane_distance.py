@@ -1,11 +1,8 @@
-# lane_distance.py
 #!/usr/bin/env python3
 """
 Lane Distance Calculator (Mapbox Edition)
 -----------------------------------------
-Calculates crow-flight distances between origin and destination cities,
-automatically picking the farthest match when names collide, and flagging
-ambiguous lookups.
+Calculates crow-flight distances between origin and destination cities.
 """
 
 import os
@@ -52,34 +49,32 @@ def clean_place(raw: object) -> Optional[str]:
     return s or None
 
 # --------------------------------------------------
-def make_mapbox_geocoder() -> Callable[[str], List[object]]:
-    """Build a RateLimiter-wrapped Mapbox geocoder returning all candidates."""
+def make_mapbox_geocoder() -> Callable[[str], Optional[object]]:
+    """Build a RateLimiter-wrapped Mapbox geocoder."""
     token = os.getenv("MAPBOX_TOKEN")
     if not token:
         sys.exit("❌ Please set your Mapbox token via export MAPBOX_TOKEN=...")
     mb = Geocoder(access_token=token)
 
-    def _forward_all(place: str):
+    def _forward(place: str):
         try:
-            resp = mb.forward(place, limit=5)
+            resp = mb.forward(place, limit=1)
             data = resp.geojson()
             features = data.get("features") or []
+            if not features:
+                return None
+            lon, lat = features[0]["geometry"]["coordinates"]
             class Loc: pass
-            locs: List[Loc] = []
-            for feat in features:
-                lon, lat = feat["geometry"]["coordinates"]
-                loc = Loc()
-                loc.latitude = lat
-                loc.longitude = lon
-                locs.append(loc)
-            return locs
-        except GeocoderUnavailable as e:
-            logging.warning(f"[geocode] service unavailable: {e}")
-            return []
+            loc = Loc()
+            loc.latitude = lat
+            loc.longitude = lon
+            return loc
+        except Exception as e:
+            raise GeocoderUnavailable(f"Mapbox error: {e}")
 
-    return RateLimiter(_forward_all, min_delay_seconds=1, max_retries=2, error_wait_seconds=5)
+    return RateLimiter(_forward, min_delay_seconds=1, max_retries=2, error_wait_seconds=5)
 
-# --------------------------------------------------
+# ----------------------------------------
 def geocode_place(
     place: Optional[str],
     geocode_func: Callable[[str], Optional[object]],
@@ -106,7 +101,10 @@ def geocode_place(
     try:
         loc = geocode_func(place)
     except GeocoderUnavailable as e:
-        logging.warning(f"[geocode] service unavailable: {e}")
+        logging.warning(f"[geocode] unavailable for '{place}': {e}")
+        return None
+    except Exception as e:
+        logging.warning(f"[geocode] error for '{place}': {e}")
         return None
 
     if loc is None:
@@ -132,49 +130,6 @@ def distance_miles(
     return geodesic(p1, p2).miles
 
 # --------------------------------------------------
-def calculate_distances_and_flags(
-    df: pd.DataFrame,
-    geocode_func: Callable[[str], List[object]],
-    cache_conn: sqlite3.Connection
-) -> Tuple[List[float], List[bool], List[bool]]:
-    """
-    For each row, geocode all candidates for origin and destination,
-    pick the pair that gives the max distance, and flag ambiguous cells.
-    """
-    dists: List[float] = []
-    origin_amb: List[bool] = []
-    dest_amb:   List[bool] = []
-
-    for o_raw, d_raw in zip(df["origin"], df["destination"]):
-        o_locs = geocode_func(o_raw) or []
-        d_locs = geocode_func(d_raw) or []
-
-        o_multi = len(o_locs) > 1
-        d_multi = len(d_locs) > 1
-
-        if not o_locs or not d_locs:
-            dists.append(float("nan"))
-            origin_amb.append(o_multi)
-            dest_amb.append(d_multi)
-            continue
-
-        best = -1.0
-        for o_loc in o_locs:
-            for d_loc in d_locs:
-                dist = geodesic(
-                    (o_loc.latitude, o_loc.longitude),
-                    (d_loc.latitude, d_loc.longitude)
-                ).miles
-                if dist > best:
-                    best = dist
-
-        dists.append(round(best, 1))
-        origin_amb.append(o_multi)
-        dest_amb.append(d_multi)
-
-    return dists, origin_amb, dest_amb
-
-# --------------------------------------------------
 def calculate_distances(
     origins: List[str],
     destinations: List[str],
@@ -198,18 +153,15 @@ def process_file(
 ) -> pd.DataFrame:
     """End-to-end file processor: clean, geocode, compute, write."""
     logging.info(f"▶ Reading {path_in}")
+    
     ext = path_in.suffix.lower()
     try:
-        df = (
-            pd.read_excel(path_in)
-            if ext in (".xls", ".xlsx")
-            else pd.read_csv(path_in)
-        )
+        df = pd.read_excel(path_in) if ext in (".xls", ".xlsx") else pd.read_csv(path_in)
     except Exception as e:
         sys.exit(f"❌ Failed to read '{path_in}': {e}")
 
     if df.shape[1] < 2:
-        sys.exit("❌ Need at least 2 columns (origin, destination)")
+        sys.exit(f"❌ Need at least 2 columns (origin, destination)")
 
     df = df.iloc[:, :2]
     df.columns = EXPECTED_COLS[:2]
@@ -218,20 +170,23 @@ def process_file(
 
     before = len(df)
     df.dropna(subset=["origin", "destination"], inplace=True)
+    # --- Reset index so distances align properly when assigned ---
+    df.reset_index(drop=True, inplace=True)
     dropped = before - len(df)
     if dropped:
         logging.warning(f"Dropped {dropped} row(s) with blank city names")
 
     geocode_func = make_mapbox_geocoder()
-    cache_conn    = open_cache()
+    cache_conn   = open_cache()
 
     logging.info("▶ Geocoding & computing distances...")
-    dists, origin_amb, dest_amb = calculate_distances_and_flags(
-        df, geocode_func, cache_conn
+    dists = calculate_distances(
+        df["origin"].tolist(),
+        df["destination"].tolist(),
+        geocode_func,
+        cache_conn
     )
-    df["lane_distance_mi"]     = dists
-    df["origin_ambiguous"]     = origin_amb
-    df["destination_ambiguous"]= dest_amb
+    df["lane_distance_mi"] = pd.Series(dists).round(1)
 
     path_out.parent.mkdir(parents=True, exist_ok=True)
     logging.info(f"▶ Writing {path_out}")
@@ -239,20 +194,7 @@ def process_file(
         if ext == ".csv":
             df.to_csv(path_out, index=False)
         else:
-            from openpyxl.styles import PatternFill
-            with pd.ExcelWriter(path_out, engine="openpyxl") as writer:
-                df.to_excel(writer, index=False, sheet_name="Distances")
-                wb = writer.book
-                ws = writer.sheets["Distances"]
-                yellow = PatternFill(fill_type="solid", fgColor="FFFF00")
-                # highlight ambiguous origin (col A) & destination (col B)
-                for row_idx, amb in enumerate(origin_amb, start=2):
-                    if amb:
-                        ws.cell(row=row_idx, column=1).fill = yellow
-                for row_idx, amb in enumerate(dest_amb, start=2):
-                    if amb:
-                        ws.cell(row=row_idx, column=2).fill = yellow
-                writer.save()
+            df.to_excel(path_out, index=False)
     except Exception as e:
         sys.exit(f"❌ Failed to write '{path_out}': {e}")
 
@@ -261,29 +203,15 @@ def process_file(
 
 # --------------------------------------------------
 def main():
-    p = argparse.ArgumentParser(
-        description="Crow-flight Lane Distance Calculator (Mapbox)"
-    )
-    p.add_argument(
-        "infile", type=pathlib.Path,
-        help="Input file (CSV or Excel)"
-    )
-    p.add_argument(
-        "-o", "--out", type=pathlib.Path,
-        default=pathlib.Path("lane_output.csv"),
-        help="Output file (default: lane_output.csv)"
-    )
-    p.add_argument(
-        "-v", "--verbose", action="store_true",
-        help="Enable verbose logging"
-    )
+    p = argparse.ArgumentParser(description="Crow-flight Lane Distance Calculator (Mapbox)")
+    p.add_argument("infile", type=pathlib.Path, help="Input file (CSV or Excel)")
+    p.add_argument("-o", "--out",   type=pathlib.Path, default=pathlib.Path("lane_output.csv"),
+                   help="Output file (default: lane_output.csv)")
+    p.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
     args = p.parse_args()
 
     log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s %(levelname)s | %(message)s"
-    )
+    logging.basicConfig(level=log_level, format="%(asctime)s %(levelname)s | %(message)s")
 
     if not args.infile.exists():
         sys.exit(f"❌ Input file not found: {args.infile}")
