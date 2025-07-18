@@ -1,16 +1,17 @@
-# streamlit_app.py
 import os
 from dotenv import load_dotenv
 import time
-load_dotenv()
+import base64
+import io
 
 import streamlit as st
 import pandas as pd
-from tempfile import NamedTemporaryFile
 import pathlib
 
 from lane_distance import get_candidates, geocode_primary
 from geopy.distance import geodesic
+
+load_dotenv()
 
 # Page config
 st.set_page_config(page_title="Lane Distance Calculator", page_icon="🛫", layout="wide")
@@ -27,8 +28,8 @@ else:
 st.sidebar.header("📑 Sample Data")
 for sf in pathlib.Path(__file__).parent.glob("sample_data.*"):
     mime = (
-        "text/csv" if sf.suffix.lower()==".csv" else
-        "application/vnd.ms-excel" if sf.suffix.lower()==".xls" else
+        "text/csv" if sf.suffix.lower() == ".csv" else
+        "application/vnd.ms-excel" if sf.suffix.lower() == ".xls" else
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     st.sidebar.download_button(
@@ -56,13 +57,13 @@ st.markdown(
     """
 )
 
-uploaded = st.file_uploader("📂 Choose a file", type=["csv","xls","xlsx"])
+uploaded = st.file_uploader("📂 Choose a file", type=["csv", "xls", "xlsx"])
 if not uploaded:
     st.stop()
 
 # Load data
 suffix = pathlib.Path(uploaded.name).suffix.lower()
-df = pd.read_excel(uploaded) if suffix in (".xls",".xlsx") else pd.read_csv(uploaded)
+df = pd.read_excel(uploaded) if suffix in (".xls", ".xlsx") else pd.read_csv(uploaded)
 
 st.subheader("📊 Data Preview")
 st.dataframe(df.head())
@@ -70,104 +71,131 @@ st.dataframe(df.head())
 if st.button("🚀 Calculate Distances"):
     total = len(df)
     start_time = time.time()
-    status = st.empty()
-    rows = []
-    ambig = []
-    nonambig = []
 
-    # Determine if destination already present
-    has_dest_cols = "destination_lat" in df.columns and "destination_lon" in df.columns
+    # Placeholders for status text and progress bar
+    status = st.empty()
+    progress = st.progress(0)
+
+    rows = []
+    has_dist = "Distance_mi" in df.columns  # existing column from old runs
 
     for i, row in df.iterrows():
         elapsed = time.time() - start_time
         left = total - i
+
         status.text(f"Elapsed: {elapsed:.1f}s | Rows left: {left}")
+        progress.progress((i + 1) / total)
 
         origin = row["Origin"]
         dest = row["Destination"]
 
-        # Skip if destination coords already present
-        if has_dest_cols and not pd.isna(row["destination_lat"]):
+        if has_dist and pd.notna(row.get("Distance_mi")):
             o_lat = row.get("origin_lat")
             o_lon = row.get("origin_lon")
-            d_lat = row["destination_lat"]
-            d_lon = row["destination_lon"]
-            dist = row.get("Distance_mi")
+            d_lat = row.get("destination_lat")
+            d_lon = row.get("destination_lon")
+            dist  = row.get("Distance_mi")
         else:
             o_lat, o_lon = geocode_primary(origin)
             d_lat, d_lon = geocode_primary(dest)
-            dist = None
             if None not in (o_lat, o_lon, d_lat, d_lon):
                 dist = geodesic((o_lat, o_lon), (d_lat, d_lon)).miles
+            else:
+                dist = None
 
-        rows.append({
-            "Origin": origin,
-            "Destination": dest,
-            "origin_lat": o_lat,
-            "origin_lon": o_lon,
-            "destination_lat": d_lat,
-            "destination_lon": d_lon,
-            "Distance_mi": dist
-        })
-
-        # Track ambiguity
         o_amb = len(get_candidates(origin)) > 1
         d_amb = len(get_candidates(dest)) > 1
-        if o_amb or d_amb:
-            ambig.append({
-                "Row": i,
-                "Origin": origin,
-                "orig_ambiguous": o_amb,
-                "Destination": dest,
-                "dest_ambiguous": d_amb
-            })
-        else:
-            nonambig.append({
-                "Origin": origin,
-                "Destination": dest,
-                "origin_lat": o_lat,
-                "origin_lon": o_lon,
-                "destination_lat": d_lat,
-                "destination_lon": d_lon,
-                "Distance_mi": dist
-            })
+
+        rows.append({
+            "origin": origin,
+            "destination": dest,
+            "is_origin_ambiguous": o_amb,
+            "is_destination_ambiguous": d_amb,
+            "origin_latitude": o_lat,
+            "origin_longitude": o_lon,
+            "destination_latitude": d_lat,
+            "destination_longitude": d_lon,
+            "distance_miles": dist
+        })
+
+    progress.empty()
+    status.empty()
 
     result = pd.DataFrame(rows)
     st.success("✅ Done calculating distances!")
 
-    # Full Results with expander
-    st.subheader("Full Results")
-    st.dataframe(result.head(5))
-    with st.expander("Show all results"):
+    # --- Non-Ambiguous Entries ---
+    nonambig_df = result[
+        (~result["is_origin_ambiguous"]) &
+        (~result["is_destination_ambiguous"])
+    ]
+    if not nonambig_df.empty:
+        st.subheader("✅ Non-Ambiguous Entries")
+        st.dataframe(nonambig_df)
+
+        # Download links
+        csv_bytes = nonambig_df.to_csv(index=False).encode("utf-8")
+        b64_csv = base64.b64encode(csv_bytes).decode()
+        st.markdown(
+            f'<a href="data:file/csv;base64,{b64_csv}" download="nonambiguous_results.csv">'
+            "📥 Download Non-Ambiguous Results (CSV)</a>",
+            unsafe_allow_html=True
+        )
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            nonambig_df.to_excel(writer, index=False)
+        excel_bytes = output.getvalue()
+        b64_xl = base64.b64encode(excel_bytes).decode()
+        st.markdown(
+            f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_xl}" '
+            'download="nonambiguous_results.xlsx">📥 Download Non-Ambiguous Results (Excel)</a>',
+            unsafe_allow_html=True
+        )
+
+    # --- Ambiguous Results Preview ---
+    st.subheader("🔍 Ambiguous Results Preview")
+    ambig_preview = result.head(5)
+    st.dataframe(ambig_preview)
+
+    csv_bytes = ambig_preview.to_csv(index=False).encode("utf-8")
+    b64_csv = base64.b64encode(csv_bytes).decode()
+    st.markdown(
+        f'<a href="data:file/csv;base64,{b64_csv}" download="ambiguous_preview.csv">'
+        "📥 Download Preview (CSV)</a>",
+        unsafe_allow_html=True
+    )
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        ambig_preview.to_excel(writer, index=False)
+    excel_bytes = output.getvalue()
+    b64_xl = base64.b64encode(excel_bytes).decode()
+    st.markdown(
+        f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_xl}" '
+        'download="ambiguous_preview.xlsx">📥 Download Preview (Excel)</a>',
+        unsafe_allow_html=True
+    )
+
+    # --- All Results ---
+    with st.expander("📂 All Results"):
         st.dataframe(result)
 
-    # Ambiguous Cities in expander
-    if ambig:
-        with st.expander("⚠️ Ambiguous Cities"):
-            st.table(pd.DataFrame(ambig))
-    else:
-        st.info("No ambiguous cities detected.")
+        csv_bytes = result.to_csv(index=False).encode("utf-8")
+        b64_csv = base64.b64encode(csv_bytes).decode()
+        st.markdown(
+            f'<a href="data:file/csv;base64,{b64_csv}" download="all_results.csv">'
+            "📥 Download All Results (CSV)</a>",
+            unsafe_allow_html=True
+        )
 
-    # Non-Ambiguous Results table
-    if nonambig:
-        st.subheader("✅ Non-Ambiguous Results")
-        st.dataframe(pd.DataFrame(nonambig))
-    else:
-        st.info("No non-ambiguous entries.")
-
-    # Download buttons
-    st.download_button(
-        "📥 Download CSV",
-        data=result.to_csv(index=False).encode("utf-8"),
-        file_name="results.csv",
-        mime="text/csv"
-    )
-    excel_tmp = NamedTemporaryFile(delete=False, suffix=".xlsx")
-    pd.DataFrame(rows).to_excel(excel_tmp.name, index=False)
-    with open(excel_tmp.name, "rb") as fp:
-        st.download_button(
-            "📥 Download Excel",
-            data=fp.read(),
-            file_name="results.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            result.to_excel(writer, index=False)
+        excel_bytes = output.getvalue()
+        b64_xl = base64.b64encode(excel_bytes).decode()
+        st.markdown(
+            f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_xl}" '
+            'download="all_results.xlsx">📥 Download All Results (Excel)</a>',
+            unsafe_allow_html=True
         )
