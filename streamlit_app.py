@@ -1,5 +1,7 @@
+
+# streamlit_app.py
+
 import os
-from dotenv import load_dotenv
 import time
 import base64
 import io
@@ -8,204 +10,106 @@ import streamlit as st
 import pandas as pd
 import pathlib
 
-from lane_distance import get_candidates, geocode_primary
-from geopy.distance import geodesic
+from lane_distance import resolve_place, great_circle
+from dotenv import load_dotenv
 
 load_dotenv()
 
-# Page config
 st.set_page_config(page_title="Lane Distance Calculator", page_icon="🛫", layout="wide")
 
-# Sidebar: Instructions
+# Sidebar instructions
 README = pathlib.Path(__file__).parent / "README.MD"
 st.sidebar.header("📖 Instructions")
 if README.exists():
-    st.sidebar.markdown(README.read_text(encoding="utf-8"))
-else:
-    st.sidebar.warning("README.MD not found.")
+    st.sidebar.markdown(README.read_text())
 
-# Sidebar: Sample Data
-st.sidebar.header("📑 Sample Data")
-for sf in pathlib.Path(__file__).parent.glob("sample_data.*"):
-    mime = (
-        "text/csv" if sf.suffix.lower() == ".csv" else
-        "application/vnd.ms-excel" if sf.suffix.lower() == ".xls" else
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    st.sidebar.download_button(
-        label=f"Download {sf.name}",
-        data=sf.read_bytes(),
-        file_name=sf.name,
-        mime=mime
-    )
-
-# Sidebar: Info
-st.sidebar.header("ℹ️ Network Info")
-st.sidebar.markdown(
-    """
-    **Geocoding Service**: Mapbox API  
-    **Rate Limits**: 1 req/sec, 2 retries  
-    """
-)
-
-# Main UI
 st.title("🛫 Lane Distance Calculator")
-st.markdown(
-    """
-    Upload a CSV or Excel file with **Origin** and **Destination** columns,  
-    then click **Calculate Distances**.
-    """
-)
 
-uploaded = st.file_uploader("📂 Choose a file", type=["csv", "xls", "xlsx"])
-if not uploaded:
-    st.stop()
+uploaded = st.file_uploader("Upload CSV or Excel file", type=["csv", "xls", "xlsx"])
 
-# Load data
-suffix = pathlib.Path(uploaded.name).suffix.lower()
-df = pd.read_excel(uploaded) if suffix in (".xls", ".xlsx") else pd.read_csv(uploaded)
+if uploaded:
+    df = (
+        pd.read_excel(uploaded)
+        if uploaded.name.lower().endswith((".xls", ".xlsx"))
+        else pd.read_csv(uploaded)
+    )
 
-st.subheader("📊 Data Preview")
-st.dataframe(df.head())
+    if st.button("Calculate"):
+        start_time = time.time()
+        total_rows = len(df)
+        status = st.empty()
+        progress = st.progress(0)
 
-if st.button("🚀 Calculate Distances"):
-    total = len(df)
-    start_time = time.time()
+        results = []
+        for idx, row in df.iterrows():
+            elapsed = time.time() - start_time
+            status.text(f"Elapsed: {elapsed:.1f}s | Rows left: {total_rows - idx - 1}")
+            progress.progress((idx + 1) / total_rows)
 
-    # Placeholders for status text and progress bar
-    status = st.empty()
-    progress = st.progress(0)
+            origin = row.get("Origin")
+            destination = row.get("Destination")
 
-    rows = []
-    has_dist = "Distance_mi" in df.columns  # legacy check
+            # Geocoding with error handling
+            try:
+                lat_o, lon_o, o_amb = resolve_place(origin)
+                origin_error = None
+            except Exception as e:
+                lat_o = lon_o = None
+                o_amb = True
+                origin_error = str(e)
 
-    for i, row in df.iterrows():
-        elapsed = time.time() - start_time
-        left = total - i
+            try:
+                lat_d, lon_d, d_amb = resolve_place(destination)
+                dest_error = None
+            except Exception as e:
+                lat_d = lon_d = None
+                d_amb = True
+                dest_error = str(e)
 
-        status.text(f"Elapsed: {elapsed:.1f}s | Rows left: {left}")
-        progress.progress((i + 1) / total)
-
-        origin = row["Origin"]
-        dest = row["Destination"]
-
-        if has_dist and pd.notna(row.get("Distance_mi")):
-            o_lat = row.get("origin_lat")
-            o_lon = row.get("origin_lon")
-            d_lat = row.get("destination_lat")
-            d_lon = row.get("destination_lon")
-            dist  = row.get("Distance_mi")
-        else:
-            o_lat, o_lon = geocode_primary(origin)
-            d_lat, d_lon = geocode_primary(dest)
-            if None not in (o_lat, o_lon, d_lat, d_lon):
-                dist = geodesic((o_lat, o_lon), (d_lat, d_lon)).miles
+            # Determine error message and distance
+            error_msg = origin_error or dest_error
+            if error_msg:
+                distance = None
             else:
-                dist = None
+                try:
+                    distance = great_circle(lat_o, lon_o, lat_d, lon_d)
+                except Exception as e:
+                    distance = None
+                    error_msg = str(e)
 
-        o_amb = len(get_candidates(origin)) > 1
-        d_amb = len(get_candidates(dest)) > 1
+            results.append({
+                "Origin": origin,
+                "Destination": destination,
+                "origin_lat": lat_o,
+                "origin_lon": lon_o,
+                "destination_lat": lat_d,
+                "destination_lon": lon_d,
+                "Distance_mi": distance,
+                "is_origin_ambiguous": o_amb,
+                "is_destination_ambiguous": d_amb,
+                "error_msg": error_msg or ""
+            })
 
-        rows.append({
-            "origin": origin,
-            "destination": dest,
-            "is_origin_ambiguous": o_amb,
-            "is_destination_ambiguous": d_amb,
-            "origin_latitude": o_lat,
-            "origin_longitude": o_lon,
-            "destination_latitude": d_lat,
-            "destination_longitude": d_lon,
-            "distance_miles": dist
-        })
+        result_df = pd.DataFrame(results)
+        st.success("✅ Calculation finished!")
 
-    # Clear placeholders
-    progress.empty()
-    status.empty()
+        st.dataframe(result_df, use_container_width=True)
 
-    result = pd.DataFrame(rows)
-    st.success("✅ Done calculating distances!")
-
-    # --- Non-Ambiguous Entries ---
-    nonambig_df = result[
-        (~result["is_origin_ambiguous"]) &
-        (~result["is_destination_ambiguous"])
-    ]
-    if not nonambig_df.empty:
-        st.subheader("✅ Non-Ambiguous Entries")
-        st.dataframe(nonambig_df)
-
-        # Download Non-Ambiguous Results (CSV)
-        csv_bytes = nonambig_df.to_csv(index=False).encode("utf-8")
+        # CSV download
+        csv_bytes = result_df.to_csv(index=False).encode("utf-8")
         b64_csv = base64.b64encode(csv_bytes).decode()
         st.markdown(
-            f'<a href="data:file/csv;base64,{b64_csv}" download="nonambiguous_results.csv">'
-            "📥 Download Non-Ambiguous Results (CSV)</a>",
-            unsafe_allow_html=True
+            f'<a href="data:file/csv;base64,{b64_csv}" download="lane_results.csv">📥 Download CSV</a>',
+            unsafe_allow_html=True,
         )
 
-        # Download Non-Ambiguous Results (Excel)
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            nonambig_df.to_excel(writer, index=False)
-        excel_bytes = output.getvalue()
-        b64_xl = base64.b64encode(excel_bytes).decode()
+        # Excel download
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+            result_df.to_excel(writer, index=False)
+        b64_excel = base64.b64encode(excel_buffer.getvalue()).decode()
         st.markdown(
-            f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_xl}" '
-            'download="nonambiguous_results.xlsx">📥 Download Non-Ambiguous Results (Excel)</a>',
-            unsafe_allow_html=True
-        )
-
-    # --- Ambiguous Entries (modeled like Non-Ambiguous) ---
-    ambig_df = result[
-        (result["is_origin_ambiguous"]) |
-        (result["is_destination_ambiguous"])
-    ]
-    if not ambig_df.empty:
-        st.subheader("🔍 Ambiguous Entries")
-        st.dataframe(ambig_df)
-
-        # Download Ambiguous Results (CSV)
-        csv_bytes = ambig_df.to_csv(index=False).encode("utf-8")
-        b64_csv = base64.b64encode(csv_bytes).decode()
-        st.markdown(
-            f'<a href="data:file/csv;base64,{b64_csv}" download="ambiguous_results.csv">'
-            "📥 Download Ambiguous Results (CSV)</a>",
-            unsafe_allow_html=True
-        )
-
-        # Download Ambiguous Results (Excel)
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            ambig_df.to_excel(writer, index=False)
-        excel_bytes = output.getvalue()
-        b64_xl = base64.b64encode(excel_bytes).decode()
-        st.markdown(
-            f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_xl}" '
-            'download="ambiguous_results.xlsx">📥 Download Ambiguous Results (Excel)</a>',
-            unsafe_allow_html=True
-        )
-
-    # --- All Results (optional) ---
-    with st.expander("📂 All Results"):
-        st.dataframe(result)
-
-        # Download All Results (CSV)
-        csv_bytes = result.to_csv(index=False).encode("utf-8")
-        b64_csv = base64.b64encode(csv_bytes).decode()
-        st.markdown(
-            f'<a href="data:file/csv;base64,{b64_csv}" download="all_results.csv">'
-            "📥 Download All Results (CSV)</a>",
-            unsafe_allow_html=True
-        )
-
-        # Download All Results (Excel)
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            result.to_excel(writer, index=False)
-        excel_bytes = output.getvalue()
-        b64_xl = base64.b64encode(excel_bytes).decode()
-        st.markdown(
-            f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_xl}" '
-            'download="all_results.xlsx">📥 Download All Results (Excel)</a>',
-            unsafe_allow_html=True
+            f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_excel}" '
+            'download="lane_results.xlsx">📥 Download Excel</a>',
+            unsafe_allow_html=True,
         )

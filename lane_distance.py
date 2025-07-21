@@ -1,100 +1,152 @@
 # lane_distance.py
-#!/usr/bin/env python3
-"""
-Lane Distance Calculator (Mapbox Hybrid Disambiguation)
-------------------------------------------------------
-– Uses Mapbox to look up up to 5 candidates per city/query
-– Filters to only `place` / `locality` types (drops regions/districts)
-– CLI always picks the first (largest) filtered match
-– Outputs Origin, Destination, origin_lat, origin_lon,
-  destination_lat, destination_lon, Distance_mi
-"""
-import os
-from dotenv import load_dotenv
-load_dotenv()
 
-import sys
 import argparse
-import logging
-import pathlib
-
 import pandas as pd
+import re
+import os
+import sys
+from pathlib import Path
+from math import radians, sin, cos, sqrt, atan2
 from mapbox import Geocoder
-from geopy.distance import geodesic
-from geopy.extra.rate_limiter import RateLimiter
 
+# ─── Mapbox forwarder ───
 
 def make_forwarder():
     token = os.getenv("MAPBOX_TOKEN")
     if not token:
-        sys.exit("❌ MAPBOX_TOKEN not set. Put it in your .env or env vars.")
-    mb = Geocoder(access_token=token)
-    return RateLimiter(mb.forward, min_delay_seconds=1, max_retries=2, error_wait_seconds=5)
+        raise ValueError("MAPBOX_TOKEN not set")
+    return Geocoder(access_token=token)
 
+# ─── Utility functions ───
 
-def get_candidates(place: str):
+def split_city_country(place: str):
+    parts = [p.strip() for p in place.split(",")]
+    city = parts[0]
+    country = parts[1] if len(parts) > 1 else ""
+    return city, country
+
+def to_iso2(country: str) -> str:
+    try:
+        import pycountry
+        return pycountry.countries.lookup(country).alpha_2
+    except Exception:
+        return ""
+
+# ─── UN/LOCODE integration (optional) ───
+UNLOCODE_CSV = Path("unlocode_2024-2.csv")
+if UNLOCODE_CSV.exists():
+    _unloc_df = (
+        pd.read_csv(UNLOCODE_CSV, dtype=str)
+          .assign(locode=lambda df: df["LOCODE"].str.strip().str.upper())
+          .set_index("locode")
+    )
+    _unloc_lookup = {
+        idx: (float(row["Latitude"]), float(row["Longitude"]))
+        for idx, row in _unloc_df.iterrows()
+    }
+else:
+    _unloc_lookup = {}
+
+LOCODE_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}$")
+
+def is_unlocode(s: str) -> bool:
+    return bool(LOCODE_RE.match(s.strip().upper()))
+
+def try_unlocode(s: str):
+    code = s.strip().upper()
+    if is_unlocode(code) and code in _unloc_lookup:
+        lat, lon = _unloc_lookup[code]
+        return lat, lon, False
+    return None
+
+# ─── Mapbox geocoding (with collapse logic) ───
+
+def get_candidates(place: str, limit: int = 5):
     forward = make_forwarder()
-    resp = forward(place, limit=5)
-    feats = resp.geojson().get("features") or []
-    places = [f for f in feats if f.get("place_type", [None])[0] in ("place","locality")]
-    return places if places else feats
+    city, country = split_city_country(place)
+    iso2 = to_iso2(country)
+    params = {"limit": limit, "types": ["place", "locality"]}
+    if iso2:
+        params["country"] = [iso2.lower()]
+    resp = forward.forward(city, **params)
+    features = resp.geojson().get("features", [])
+    seen = {}
+    for f in features:
+        lon, lat = f["geometry"]["coordinates"]
+        key = (round(lat, 3), round(lon, 3))
+        seen.setdefault(key, []).append(f)
+    return [v[0] for v in seen.values()]
 
+def geocode_with_mapbox(place: str):
+    candidates = get_candidates(place)
+    if not candidates:
+        raise ValueError(f"No mapbox candidates for '{place}'")
+    f = candidates[0]
+    lon, lat = f["geometry"]["coordinates"]
+    ambiguous = len(candidates) > 1
+    return lat, lon, ambiguous
 
-def geocode_primary(place: str):
-    cands = get_candidates(place)
-    if not cands:
-        return None, None
-    lon, lat = cands[0]["geometry"]["coordinates"]
-    return lat, lon
+# ─── Distance formula ───
 
+def great_circle(lat1, lon1, lat2, lon2):
+    r = 3958.8
+    phi1, phi2 = radians(lat1), radians(lat2)
+    dphi = radians(lat2 - lat1)
+    dlambda = radians(lon2 - lon1)
+    a = sin(dphi/2)**2 + cos(phi1)*cos(phi2)*sin(dlambda/2)**2
+    return 2 * r * atan2(sqrt(a), sqrt(1 - a))
 
-def process_file(infile: pathlib.Path, outfile: pathlib.Path = None) -> pathlib.Path:
-    if infile.suffix.lower() in (".xls",".xlsx"):
-        df = pd.read_excel(infile)
-    else:
-        df = pd.read_csv(infile)
+# ─── Resolver ───
 
-    df["origin_lat"], df["origin_lon"] = zip(*df["Origin"].apply(geocode_primary))
-    df["destination_lat"], df["destination_lon"] = zip(*df["Destination"].apply(geocode_primary))
+def resolve_place(place: str):
+    un = try_unlocode(place)
+    if un is not None:
+        return un
+    return geocode_with_mapbox(place)
 
-    def compute(r):
-        if None in (r.origin_lat, r.origin_lon, r.destination_lat, r.destination_lon):
-            return None
-        return geodesic((r.origin_lat, r.origin_lon), (r.destination_lat, r.destination_lon)).miles
-    df["Distance_mi"] = df.apply(compute, axis=1)
-
-    out_df = df[[
-        "Origin","Destination",
-        "origin_lat","origin_lon",
-        "destination_lat","destination_lon",
-        "Distance_mi"
-    ]]
-
-    if not outfile:
-        outfile = infile.with_name(f"{infile.stem}_processed{infile.suffix}")
-    if outfile.suffix.lower() in (".xls",".xlsx"):
-        out_df.to_excel(outfile, index=False)
-    else:
-        out_df.to_csv(outfile, index=False)
-    return outfile
-
+# ─── CLI Entry Point ───
 
 def main():
-    p = argparse.ArgumentParser(description="Compute lane distances (hybrid disambiguation).")
-    p.add_argument("infile", type=pathlib.Path, help="CSV/XLSX input file")
-    p.add_argument("-o","--out", type=pathlib.Path, help="Output file path")
-    p.add_argument("-v","--verbose", action="store_true", help="Verbose logging")
-    args = p.parse_args()
+    parser = argparse.ArgumentParser(description="Calculate great-circle distances.")
+    parser.add_argument("input_file", help="CSV or Excel with 'origin' and 'destination'")
+    parser.add_argument("-o", "--output", required=True, help="Output path (CSV or Excel)")
+    args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s | %(message)s"
-    )
-    if not args.infile.exists():
-        sys.exit(f"❌ Input file not found: {args.infile}")
-    out = process_file(args.infile, args.out)
-    logging.info(f"✅ Written results to {out}")
+    input_path = Path(args.input_file)
+    if input_path.suffix.lower() in [".xls", ".xlsx"]:
+        df = pd.read_excel(input_path)
+    else:
+        df = pd.read_csv(input_path)
 
+    for col in ["origin", "destination"]:
+        if col not in df.columns:
+            print(f"Missing column '{col}'", file=sys.stderr)
+            sys.exit(1)
+
+    for col in [
+        "origin_latitude", "origin_longitude",
+        "destination_latitude", "destination_longitude",
+        "is_origin_ambiguous", "is_destination_ambiguous",
+        "distance_miles"
+    ]:
+        df[col] = None
+
+    for idx, row in df.iterrows():
+        lat_o, lon_o, amb_o = resolve_place(row['origin'])
+        lat_d, lon_d, amb_d = resolve_place(row['destination'])
+        df.at[idx, 'origin_latitude'] = lat_o
+        df.at[idx, 'origin_longitude'] = lon_o
+        df.at[idx, 'destination_latitude'] = lat_d
+        df.at[idx, 'destination_longitude'] = lon_d
+        df.at[idx, 'is_origin_ambiguous'] = amb_o
+        df.at[idx, 'is_destination_ambiguous'] = amb_d
+        df.at[idx, 'distance_miles'] = great_circle(lat_o, lon_o, lat_d, lon_d)
+
+    output_path = Path(args.output)
+    if output_path.suffix.lower() in [".xls", ".xlsx"]:
+        df.to_excel(output_path, index=False)
+    else:
+        df.to_csv(output_path, index=False)
 
 if __name__ == "__main__":
     main()
