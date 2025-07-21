@@ -1,4 +1,3 @@
-
 # streamlit_app.py
 
 import os
@@ -66,7 +65,7 @@ if uploaded:
                 d_amb = True
                 dest_error = str(e)
 
-            # Determine error message and distance
+            # Determine error and distance
             error_msg = origin_error or dest_error
             if error_msg:
                 distance = None

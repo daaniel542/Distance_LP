@@ -7,8 +7,6 @@ A logistics application that calculates direct (crow-flight) distances between c
 - **Geocoding with Caching**: Efficiently geocodes city locations with SQLite caching
 - **Rate-Limited API Calls**: Respects geocoding service limits
 - **Multiple Input Formats**: Supports Excel (.xlsx, .xls) and CSV files
-- **Web Interface**: Beautiful Streamlit web app for easy file processing
-- **Command Line Interface**: Powerful CLI for batch processing
 
 ## 📋 Input Format
 
