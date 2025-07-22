@@ -17,7 +17,6 @@ load_dotenv()
 st.set_page_config(page_title="Lane Distance Calculator", page_icon="🛫", layout="wide")
 
 README = pathlib.Path(__file__).parent / "README.MD"
-st.sidebar.header("📖 Instructions")
 if README.exists():
     st.sidebar.markdown(README.read_text())
 
@@ -88,17 +87,17 @@ if uploaded:
             results.append({
                 'Origin': name_o,
                 'Destination': name_d,
-                'Origin_LOCODE': code_o,
-                'Destination_LOCODE': code_d,
-                'origin_latitude': lat_o,
-                'origin_longitude': lon_o,
-                'destination_latitude': lat_d,
-                'destination_longitude': lon_d,
-                'is_origin_ambiguous': amb_o,
-                'is_destination_ambiguous': amb_d,
-                'distance_miles': distance,
-                'used_UNLOCODEs': used_both,
-                'error_msg': error_msg
+                'Origin LOCODE': code_o,
+                'Destination LOCODE': code_d,
+                'Origin latitude': lat_o,
+                'Origin longitude': lon_o,
+                'Destination latitude': lat_d,
+                'Destination longitude': lon_d,
+                'Distance_miles': distance,
+                'Used UNLOCODEs': used_both,
+                'Ambiguous Origin': amb_o,
+                'Ambiguous Destination': amb_d,
+                'Error_msg': error_msg
             })
 
         # Display results
