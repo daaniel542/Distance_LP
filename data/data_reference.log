@@ -1,0 +1,7 @@
+#   set it to unlocode_master.csv when running new cities (call MAPBOX API)
+#   set it to unlocode_wkt.csv - this already filled using values from MAPBOX (Raw data)
+#   data/unlocode_2024-2.csv: this is the raw original database from UN website - missing several coordinates (raw data)
+#   data/unlocode_clean.csv: this is the cleaned UN data 
+#   data/unlocode_master.csv: this is the combined database of the UN and OGCWKT data from CargoWise
+#   data/unlocode_wkt.csv: this is raw data still in the OGCWKT strings (raw data)
+#   data/unlocode_master_prebaked.csv: this is the master data + prebaked data from mapbox (no API Calls)

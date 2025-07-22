@@ -15,8 +15,10 @@ if 'cache_data' in dir(st):
     st.cache_data.clear()
 
 # ─── STATIC MASTER LOOKUP ────────────────────────────────────────────────────
+#   this is the database where the UNLOCODEs are getting pulled from
 
-MASTER_CSV = Path("unlocode_master.csv")
+MASTER_CSV = Path("data/unlocode_master.csv")
+
 
 _master_df = (
     pd.read_csv(MASTER_CSV, dtype=str, encoding="latin-1")
