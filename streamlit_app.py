@@ -7,6 +7,7 @@ import pathlib
 import streamlit as st
 import pandas as pd
 
+# resolve_place now returns (lat, lon, ambiguous, used_unlocode, source)
 from lane_distance import resolve_place, great_circle, mapbox_distance
 from dotenv import load_dotenv
 
@@ -81,30 +82,38 @@ else:
             name_o = row.get("Origin") or row.get("origin")
             code_o = row.get(origin_code_col) if origin_code_col else None
             try:
-                lat_o, lon_o, amb_o, used_o = resolve_place(name_o, code_o)
+                lat_o, lon_o, amb_o, used_o, src_o = resolve_place(name_o, code_o)
                 err_o = ""
             except Exception as e:
                 lat_o = lon_o = None
                 amb_o = True
                 used_o = False
+                src_o = None
                 err_o = str(e)
 
             # Geocode destination
             name_d = row.get("Destination") or row.get("destination")
             code_d = row.get(dest_code_col) if dest_code_col else None
             try:
-                lat_d, lon_d, amb_d, used_d = resolve_place(name_d, code_d)
+                lat_d, lon_d, amb_d, used_d, src_d = resolve_place(name_d, code_d)
                 err_d = ""
             except Exception as e:
                 lat_d = lon_d = None
                 amb_d = True
                 used_d = False
+                src_d = None
                 err_d = str(e)
 
             # Unambiguous if both LOCODEs used
             used_both = bool(used_o and used_d)
             if used_both:
                 amb_o = amb_d = False
+
+            # Determine record-level source
+            if src_o == src_d:
+                source = src_o or ""
+            else:
+                source = ",".join(filter(None, [src_o, src_d]))
 
             # Distance calc
             distance = None
@@ -129,6 +138,7 @@ else:
                 "Destination longitude": lon_d,
                 "Distance_miles": distance,
                 "Used UNLOCODEs": used_both,
+                "Source": source,
                 "Ambiguous Origin": amb_o,
                 "Ambiguous Destination": amb_d,
                 "Error_msg": error_msg
