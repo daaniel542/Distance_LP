@@ -5,7 +5,7 @@ Primary Method: The app uses official UNLOCODEs to determine locations and compu
 
 Automatic Fallback: If a UNLOCODE match is not available, the app automatically falls back to the Mapbox Geocoding API for location lookup and distance calculation.
 
-Accuracy Note: Results using UNLOCODEs are the most accurate. When the Mapbox fallback is used, distances may vary by approximately ±20 miles due to geocoding limitations.
+Accuracy Note: Results using UNLOCODEs are the most accurate. When the Mapbox fallback is used, distances may vary by approximately ± 1-20 miles due to geocoding limitations.
 
 ## 🚀 Features
 
@@ -28,7 +28,7 @@ Your input file should have at least 2 columns:
 - Country codes should be 2-letter ISO codes (e.g., "US", "GB", "FR")
 
 ## 🛠️ Installation
-
+To run locally:
 1. Install dependencies:
    ```bash
    pip install -r requirements.txt
