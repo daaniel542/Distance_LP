@@ -1,11 +1,11 @@
 # 🛫 Lane Distance Calculator
+This application calculates direct, “as-the-crow-flies” distances between cities for logistics and lane analysis.
 
-An application that calculates direct (crow-flight) distances between cities.
+Primary Method: The app uses official UNLOCODEs to determine locations and compute the most accurate distances possible.
 
-The app will calculate distances using UNLOCODEs, however if it's unable to calculate them, it will use MAPBOX API to calculate with Geocoding formulas.
+Automatic Fallback: If a UNLOCODE match is not available, the app automatically falls back to the Mapbox Geocoding API for location lookup and distance calculation.
 
-The most accurate calculations will be from the UNLOCODES. 
-Expect at least an ±20 miles when using MAPBOX API for calculations
+Accuracy Note: Results using UNLOCODEs are the most accurate. When the Mapbox fallback is used, distances may vary by approximately ±20 miles due to geocoding limitations.
 
 ## 🚀 Features
 
