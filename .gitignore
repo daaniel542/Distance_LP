@@ -1,1 +1,4 @@
 .env
+
+data/mapbox_filled_coords.csv
+data/unlocode_master_updated.csv
