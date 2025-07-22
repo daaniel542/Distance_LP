@@ -268,14 +268,14 @@ def main():
                     distance = great_circle(lat_o, lon_o, lat_d, lon_d)
 
         results.append({
-            "origin_latitude": lat_o,
-            "origin_longitude": lon_o,
-            "destination_latitude": lat_d,
-            "destination_longitude": lon_d,
-            "is_origin_ambiguous": amb_o,
-            "is_destination_ambiguous": amb_d,
+            "Origin Latitude": lat_o,
+            "Origin Longitude": lon_o,
+            "Destination Latitude": lat_d,
+            "Destination Longitude": lon_d,
+            "Ambiguous Origin": amb_o,
+            "Ambiguous Destination": amb_d,
             "distance_miles": distance,
-            "used_UNLOCODEs": used_both,
+            "Used UNLOCODEs": used_both,
             "error_msg": err_any
         })
 

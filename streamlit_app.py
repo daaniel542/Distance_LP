@@ -115,7 +115,25 @@ else:
 
         df_out = pd.DataFrame(results)
         st.success("✅ Calculation finished!")
-        st.dataframe(df_out, use_container_width=True)
+
+        # Highlight MAPBOX distances for APT/PT origin/destination
+        def highlight_mapbox_apt(row):
+            name_o = row["Origin"] or ""
+            name_d = row["Destination"] or ""
+            if not row["Used UNLOCODEs"] and (
+                "APT" in name_o.upper() or "PT" in name_o.upper() or
+                "APT" in name_d.upper() or "PT" in name_d.upper()
+            ):
+                # Highlight only the Distance_miles column
+                return [
+                    "background-color: yellow" if col == "Distance_miles" else ""
+                    for col in row.index
+                ]
+            else:
+                return ["" for _ in row.index]
+
+        styled_df = df_out.style.apply(highlight_mapbox_apt, axis=1)
+        st.dataframe(styled_df, use_container_width=True)
 
         # CSV download
         csv_bytes = df_out.to_csv(index=False).encode("utf-8")
