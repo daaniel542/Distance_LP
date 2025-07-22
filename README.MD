@@ -1,6 +1,6 @@
 # 🛫 Lane Distance Calculator
 
-A logistics application that calculates direct (crow-flight) distances between cities for shipping lane analysis.
+An application that calculates direct (crow-flight) distances between cities.
 
 The app will calculate distances using UNLOCODEs, however if it's unable to calculate them, it will use MAPBOX API to calculate with Geocoding formulas.
 
