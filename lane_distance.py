@@ -17,16 +17,16 @@ if 'cache_data' in dir(st):
 # ─── STATIC MASTER LOOKUP ────────────────────────────────────────────────────
 #   this is the database where the UNLOCODEs are getting pulled from
 
-MASTER_CSV = Path("data/unlocode_master.csv")
-
+MASTER_CSV = Path("data/unlocode_master_updated.csv")
 
 _master_df = (
     pd.read_csv(MASTER_CSV, dtype=str, encoding="latin-1")
       .assign(
-         code=lambda df: df["code"].str.strip().str.upper(),
-         Latitude=lambda df: pd.to_numeric(df["Latitude"], errors="coerce"),
-         Longitude=lambda df: pd.to_numeric(df["Longitude"], errors="coerce"),
-         src=lambda df: df["src"].astype(str),
+         # ← here’s the only change: read from LOCODE, not code
+         code     = lambda df: df["LOCODE"].str.strip().str.upper(),
+         Latitude = lambda df: pd.to_numeric(df["Latitude"], errors="coerce"),
+         Longitude= lambda df: pd.to_numeric(df["Longitude"], errors="coerce"),
+         src      = lambda df: df["src"].astype(str),
       )
 )
 
