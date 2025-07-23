@@ -5,7 +5,7 @@ Primary Method: The app uses official UNLOCODEs to determine locations and compu
 
 Automatic Fallback: If a UNLOCODE match is not available, the app automatically falls back to the Mapbox Geocoding API for location lookup and distance calculation.
 
-Accuracy Note: Results using UNLOCODEs are the most accurate. When the Mapbox fallback is used, distances may vary by approximately ± 1-20 miles due to geocoding limitations.
+Accuracy Note: Results using UNLOCODEs are the most accurate. When the Mapbox fallback is used, distances may vary by approximately in the range of ± 1-20 miles due to geocoding limitations.
 
 ## 🚀 Features
 
@@ -14,7 +14,8 @@ Accuracy Note: Results using UNLOCODEs are the most accurate. When the Mapbox fa
 
 ## 📋 Input Format
 
-Your input file should have at least 2 columns:
+Your input file should have at least 2 columns, Origin and Dsestination. However using providing Origin and Destination LOCODEs will greatly improve accuracy:
+
 
 | Origin       | Destination     | Origin LOCODE | Dest LOCODE |  
 | ------------ | --------------- | -------------- | ------------ |  
@@ -26,6 +27,7 @@ Your input file should have at least 2 columns:
 **City Format**: `City Name, Country Code`
 - City names should be spelled out (e.g., "New York", "Los Angeles")
 - Country codes should be 2-letter ISO codes (e.g., "US", "GB", "FR")
+- Input format must be exactly similar to the example input provided above, or the app will not run as expected!
 
 ## 🛠️ Installation
 To run locally:

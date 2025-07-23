@@ -26,6 +26,14 @@ uploaded = st.file_uploader("Upload CSV or Excel", type=["csv", "xls", "xlsx"])
 if not uploaded:
     st.info("Please upload a file to get started.")
 else:
+    # If this is a new upload, reset previous results
+    if (
+        "uploaded_name" not in st.session_state
+        or st.session_state.uploaded_name != uploaded.name
+    ):
+        st.session_state.uploaded_name = uploaded.name
+        st.session_state.df_out = None
+
     # ─────────────────────────────────────────────────────────────────
     # Load the input file
     # ─────────────────────────────────────────────────────────────────
@@ -144,8 +152,14 @@ else:
                 "Error_msg": error_msg
             })
 
-        df_out = pd.DataFrame(results)
+        st.session_state.df_out = pd.DataFrame(results)
         st.success("✅ Calculation finished!")
+
+    # ─────────────────────────────────────────────────────────────────
+    # Display and filter results if available
+    # ─────────────────────────────────────────────────────────────────
+    if st.session_state.get("df_out") is not None:
+        df_out = st.session_state.df_out
 
         # Show-only-issues toggle
         show_issues = st.checkbox("Show only issues", value=False)

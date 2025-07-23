@@ -1,3 +1,23 @@
+# lane_distance.py
+
+import logging
+
+# ─── QUIET DOWN OTHER LIBRARIES ───────────────────────────────────────────────
+for lib in (
+    'watchdog',               # Streamlit’s file‐watcher core
+    'watchdog.events',        # file‐watcher events
+    'watchdog.observers',     # file‐watcher observers
+    'urllib3',                # HTTP connection logging
+    'http.client',            # lower‐level HTTP
+    'mapbox',                 # Mapbox SDK
+    'streamlit',              # Streamlit framework itself
+):
+    logging.getLogger(lib).setLevel(logging.WARNING)
+
+# ─── NOW ENABLE YOUR DEBUG LOGGING ────────────────────────────────────────────
+logging.basicConfig(format='[DEBUG] %(message)s', level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 import os
 import argparse
 import pandas as pd
@@ -15,18 +35,15 @@ if 'cache_data' in dir(st):
     st.cache_data.clear()
 
 # ─── STATIC MASTER LOOKUP ────────────────────────────────────────────────────
-#   this is the database where the UNLOCODEs are getting pulled from
-
 MASTER_CSV = Path("data/unlocode_master_updated.csv")
 
 _master_df = (
     pd.read_csv(MASTER_CSV, dtype=str, encoding="latin-1")
       .assign(
-         # ← here’s the only change: read from LOCODE, not code
-         code     = lambda df: df["LOCODE"].str.strip().str.upper(),
-         Latitude = lambda df: pd.to_numeric(df["Latitude"], errors="coerce"),
-         Longitude= lambda df: pd.to_numeric(df["Longitude"], errors="coerce"),
-         src      = lambda df: df["src"].astype(str),
+         code      = lambda df: df["LOCODE"].str.strip().str.upper(),
+         Latitude  = lambda df: pd.to_numeric(df["Latitude"], errors="coerce"),
+         Longitude = lambda df: pd.to_numeric(df["Longitude"], errors="coerce"),
+         src       = lambda df: df["src"].astype(str),
       )
 )
 
@@ -81,9 +98,6 @@ def make_directions():
 # ─── GEOCODING & DISTANCE ─────────────────────────────────────────────────────
 
 def get_candidates(name: str) -> list:
-    """
-    Return Mapbox geocoding candidates for `name`.
-    """
     geocoder = make_geocoder()
     resp = geocoder.forward(name, limit=5)
     resp.raise_for_status()
@@ -123,21 +137,24 @@ def resolve_place(
 ) -> Tuple[float, float, bool, bool, str]:
     """
     Return (lat, lon, ambiguous_flag, used_unlocode_flag, source).
-      - source is one of "UNLOCODE", "WKT", or "MAPBOX".
+      - source is one of "UNLOCODE" or "MAPBOX".
     """
     # 1) Try explicit LOCODE
     r = try_unlocode(code)
     if r:
         lat, lon, src = r
+        logger.debug(f"used UNLOCODE for code='{code.strip().upper()}'")
         return lat, lon, False, True, src
 
     # 2) Try LOCODE from name string
     r2 = try_unlocode(name)
     if r2:
         lat, lon, src = r2
+        logger.debug(f"used UNLOCODE for code derived from name='{name.strip().upper()}'")
         return lat, lon, False, True, src
 
     # 3) Fallback to Mapbox
+    logger.debug(f"falling back to Mapbox for name='{name}'")
     candidates = get_candidates(name)
     if len(candidates) == 1:
         lon_m, lat_m = candidates[0]["geometry"]["coordinates"]
@@ -160,7 +177,6 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
-    # Load input
     inp = Path(args.input)
     df = (
         pd.read_csv(inp, dtype=str)
@@ -169,7 +185,7 @@ def main():
     )
 
     results = []
-    for idx, row in df.iterrows():
+    for _, row in df.iterrows():
         name_o, code_o = row.get("Origin"), row.get("Origin_LOCODE")
         name_d, code_d = row.get("Destination"), row.get("Dest_LOCODE")
 
@@ -186,21 +202,18 @@ def main():
                 dist = great_circle(lat_o, lon_o, lat_d, lon_d)
 
         # Determine combined source tag
-        if src_o == src_d:
-            source = src_o or ""
-        else:
-            source = ",".join(filter(None, [src_o, src_d]))
+        source = src_o if src_o == src_d else ",".join(filter(None, [src_o, src_d]))
 
         out = row.to_dict()
         out.update({
-            "Origin_latitude": lat_o,
-            "Origin_longitude": lon_o,
-            "Destination_latitude": lat_d,
+            "Origin_latitude":       lat_o,
+            "Origin_longitude":      lon_o,
+            "Destination_latitude":  lat_d,
             "Destination_longitude": lon_d,
-            "Distance_miles": dist,
-            "Used_UNLOCODEs": used_both,
-            "Source": source,
-            "Ambiguous_Origin": amb_o,
+            "Distance_miles":        dist,
+            "Used_UNLOCODEs":        used_both,
+            "Source":                source,
+            "Ambiguous_Origin":      amb_o,
             "Ambiguous_Destination": amb_d,
         })
         results.append(out)
