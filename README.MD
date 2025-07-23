@@ -14,7 +14,7 @@ Accuracy Note: Results using UNLOCODEs are the most accurate. When the Mapbox fa
 
 ## 📋 Input Format
 
-Your input file should have at least 2 columns, Origin and Dsestination. However using providing Origin and Destination LOCODEs will greatly improve accuracy:
+Your input file should have at least 2 columns, Origin and Destination. However using providing Origin and Destination LOCODEs will greatly improve accuracy:
 
 
 | Origin       | Destination     | Origin LOCODE | Dest LOCODE |  
