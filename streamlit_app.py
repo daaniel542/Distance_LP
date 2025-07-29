@@ -20,7 +20,7 @@ README = pathlib.Path(__file__).parent / "README.MD"
 if README.exists():
     st.sidebar.markdown(README.read_text())
 
-st.title("🛫 Lane Distance Calculator")
+st.title("🛫Lane Distance Calculator")
 
 uploaded = st.file_uploader("Upload CSV or Excel", type=["csv", "xls", "xlsx"])
 if not uploaded:
