@@ -43,3 +43,5 @@ To run locally:
 | London, GB     | Paris, FR        | GBLON         | FRPAR              | 51.507400       | -0.1278          | 48.850000            | 2.350000              | 213.823477     | True           |                  |                       |           |
 | Tokyo, JP      | Seoul, KR        | JPTYO         | KRSEL              | 35.683333       | 139.7500         | 37.516667            | 126.933333            | 721.536981     | True           |                  |                       |           |
 
+## API Stuff
+The geocoding uses Mapbox data. See details regarding using their API servers. To implement this, create and store API Token into an .env file within the home directory, Distance_LP.
