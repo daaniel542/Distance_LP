@@ -3,6 +3,7 @@ import time
 import base64
 import io
 import pathlib
+import re
 
 import streamlit as st
 import pandas as pd
@@ -15,10 +16,35 @@ load_dotenv()
 
 st.set_page_config(page_title="Lane Distance Calculator", layout="wide")
 
+def remove_private_readme_sections(markdown: str) -> str:
+    lines = markdown.splitlines()
+    visible_lines = []
+    skip_section = False
+    skip_level = None
+
+    for line in lines:
+        reflection_heading = re.match(r"^(#{1,6})\s*Reflections:?\s*$", line.strip(), re.IGNORECASE)
+        if reflection_heading:
+            skip_section = True
+            skip_level = len(reflection_heading.group(1))
+            continue
+
+        if skip_section:
+            next_heading = re.match(r"^(#{1,6})\s+", line)
+            if next_heading and len(next_heading.group(1)) <= skip_level:
+                skip_section = False
+            else:
+                continue
+
+        visible_lines.append(line)
+
+    return "\n".join(visible_lines).strip()
+
+
 # Sidebar README
 README = pathlib.Path(__file__).parent / "README.MD"
 if README.exists():
-    st.sidebar.markdown(README.read_text())
+    st.sidebar.markdown(remove_private_readme_sections(README.read_text()))
 
 st.title("🛫Lane Distance Calculator")
 
