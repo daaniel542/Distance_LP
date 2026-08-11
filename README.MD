@@ -1,3 +1,9 @@
+### Reflections:
+If anyone is curious enough to look at this project here are some of my thoughts
+   1) Looking back at this project, there was too much vibe, not enough coding (the secrets are deleted now, don't even bother trying). 
+   2) The git history is genuinely a mess, but I guess that's how you learn. 
+
+
 # 🛫 Lane Distance Calculator
 This application calculates direct, “as-the-crow-flies” distances between cities for logistics and lane analysis.
 
@@ -45,3 +51,6 @@ To run locally:
 
 ## API Documentation
 The geocoding uses Mapbox data. See details regarding using their API servers. To implement this, create and store API Token into an .env file within the home directory, /Distance_LP.
+
+
+
